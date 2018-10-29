@@ -1,0 +1,199 @@
+---
+title: "Pima Indians Diabetes - Spotcheck"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, include=FALSE}
+library(tidyverse)
+library(rlang)
+library(caret)
+library(emc)
+library(recipes)
+library(forcats)
+
+knitr::opts_chunk$set(fig.width = 14, fig.height = 8, echo = FALSE, warning = FALSE, message = FALSE, comment = "")
+options(width = 120)
+
+source("./pid_load.R")
+```
+
+# Variable Strategy
+
+## Pregnant
+
+None
+
+## Glucose
+
+Only two missing values. Consider "reasonably complete".
+## Pressure
+
+30 missing values. Consider "reasonably complete".
+
+## Mass
+
+9 missing values. Consider "reasonably complete".
+
+## Triceps
+
+185 missing values. Consider "incomplete".
+
+## insulin
+
+301 missing values. Consider "incomplete".
+
+```{r}
+quick_spot_df <- pid_load() %>% pid_holdout() %>% pid_clean()
+numeric_cols <- quick_spot_df %>% select_if(is.numeric) %>% colnames() %>% syms()
+complete_cols <- c("pregnant", "pedigree", "age")
+reasonable_complete_cols <- c("glucose", "mass", "pressure")
+incomplete_cols <- c("triceps", "insulin")
+
+```
+
+# Quick Spotcheck Algorithms
+
+## Strategy
+
+Standardize variables.
+
+Impute reasonably complete values with median.
+
+Impute incomplete values with bag imputation.
+
+## View algorithms
+
+```{r}
+
+emc_algorithms() %>% filter(two_class, core)
+
+```
+
+Try 
+
+```{r}
+quick_spot_algorithms <- c("earth", "glmnet", "lda", "nb", "ada", "rf", "svmLinear", "svmRadial", "xgbLinear", "xgbTree")
+paste(quick_spot_algorithms, collapse = ", ") %>% cat()
+```
+
+## Spotcheck parameters
+
+View the spotcheck parameters
+
+```{r}
+quick_spot_parameters <- 
+    expand.grid(algorithm = quick_spot_algorithms) %>% as_tibble() %>%
+    mutate(label = sprintf("Quick spotcheck algorithm '%s'", algorithm))
+quick_spot_parameters
+```
+
+## Spotcheck emc
+
+```{r}
+quick_spot_metric <- "Accuracy"
+quick_spot_control <- trainControl(method = "repeatedcv", number = 5, repeats = 5)
+quick_spot_recipe <- recipe(diabetes ~ ., quick_spot_df) %>% 
+    step_meanimpute(reasonable_complete_cols) %>%
+    step_scale(all_predictors()) %>%
+    step_center(all_predictors()) %>%
+    step_BoxCox(all_predictors()) %>%
+    step_bagimpute(triceps) %>%
+    step_bagimpute(insulin)
+
+
+if (!exists("prior_quick_spot_emc")) {
+    prior_quick_spot_emc <- NULL
+}
+
+# prior_quick_spot_emc <- quick_spot_emc
+
+quick_spot_emc <-
+    emc_bind(
+        quick_spot_parameters,
+         emc_record(
+             train = train(
+                 quick_spot_recipe,
+                 data = quick_spot_df,
+                 method = algorithm,
+                 trControl = quick_spot_control,
+                 metric = quick_spot_metric
+             ),
+             .label = label,
+             .verbose = FALSE,
+             .cache_path = paste0("Cache/", label, ".rds")
+         ),
+        emc_performance(train),
+        emc_resamples(train)
+    )
+
+quick_spot_emc %>% dplyr::select(label, Accuracy, train_error, train_warnings, train_duration) %>% arrange(desc(Accuracy))
+```
+
+## Accuracy Boxplot
+
+```{r}
+
+quick_spot_resamples <- 
+    quick_spot_emc %>%
+    dplyr::select(algorithm, resamples) %>% 
+    unnest(resamples)
+
+quick_spot_resamples %>%
+    ggplot() +
+    geom_boxplot(aes(x = fct_reorder(algorithm, Accuracy), y = Accuracy))
+    
+```
+
+Ada has a higher median value but I trust earth better because its a linear algorithm and has a more stable accuracy.
+
+## Accuracy Density Plot
+
+```{r}
+quick_spot_emc %>% 
+    dplyr::select(algorithm, resamples) %>% 
+    filter(algorithm != "null") %>%
+    unnest(resamples) %>%
+    ggplot() +
+    geom_density(aes(x = Accuracy, color = algorithm))
+```
+
+Possibly non-linear response. SVM might help.
+
+After checking it doesn't! Earth gives a nice stable result. We'll go with that.
+
+We've hit the top accuracy of 77%.
+
+Get the final model.
+
+```{r}
+final_model <- quick_spot_emc %>% filter(algorithm == "earth") %>% pull(train) %>% first()
+final_model
+```
+
+Look like there is room for tuning.
+
+But lets just grab the final model and validate it.
+
+```{r}
+final_model <- quick_spot_emc %>% filter(algorithm == "earth") %>% pull(train) %>% first()
+test_df <- pid_training(pid_load())
+test_predictions <- predict(final_model, newdata = test_df)
+caret::confusionMatrix(test_predictions, test_df$diabetes)
+
+```
+
+73% accuracy with the 95% CI inside our 77% target.
+
+# Further Work
+
+' Add features to emc to extract caret resamples.
+parallelplot(spotCheck)
+
+' Add features to emc to for pairwise scatter plots
+splom(spotCheck)
+
+' Add features to emc to extract caret resamples.
+summary(diff(spotCheck))
+

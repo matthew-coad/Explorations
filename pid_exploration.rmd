@@ -1,0 +1,228 @@
+---
+title: "Pima Indians Diabetes - Data Exploration"
+output:
+  html_document:
+    df_print: paged
+---
+The Pima Indians Diabetes Dataset involves predicting the onset of diabetes within 5 years in Pima Indians given medical details.
+It is a binary(2 - class) classification problem. 
+
+The number of observations for each class is not balanced.
+
+There are 768 observations with 8 input variables and 1 output variable. Missing values are believed to be encoded with zero values.
+The variable names are as follows:
+
+1. Number of times pregnant.
+2. Plasma glucose concentration a 2 hours in an oral glucose tolerance test.
+3. Diastolic blood pressure(mm Hg) .
+4. Triceps skinfold thickness(mm) .
+5. 2 - Hour serum insulin(mu U / ml) .
+6. Body mass index(weight in kg / (height in m) ^ 2) .
+7. Diabetes pedigree function.
+8. Age(years) .
+9. Class variable(0 or 1) .
+
+The baseline performance of predicting the most prevalent class is a classification accuracy of approximately 65%. 
+
+Top results achieve a classification accuracy of approximately 77%.
+
+```{r, include=FALSE}
+library(tidyverse)
+library(caret)
+library(e1071)
+library(emc)
+library(rlang)
+
+knitr::opts_chunk$set(fig.width = 14, fig.height = 8, echo = FALSE, warning = FALSE, message = FALSE, comment = "")
+options(width = 120)
+
+source("./pid_load.R")
+
+```
+
+```{r}
+
+## Load data
+data(PimaIndiansDiabetes, package = "mlbench")
+
+# Split into training and holdouts datasets
+pid_seed <- 9
+set.seed(pid_seed)
+partition_idx <- caret::createDataPartition(PimaIndiansDiabetes$diabetes, p = 4/5, list = FALSE)
+training_df <- PimaIndiansDiabetes[ partition_idx,]
+testing_df  <- PimaIndiansDiabetes[-partition_idx,]
+numeric_cols <- training_df %>% select_if(is.numeric) %>% colnames() %>% syms()
+```
+
+# Descriptive Statistics
+
+## Data Peek
+
+```{r, echo=FALSE}
+head(training_df, n = 20) %>% knitr::kable()
+```
+
+Data has a variety of scales. Consider standardization.
+
+## Response Distribution
+
+```{r}
+emc_level_statistics(training_df)
+```
+
+## Variable Degeneracy
+
+```{r}
+emc_variable_degeneracy(training_df) %>% knitr::kable(digits = 1)
+```
+
+All predictors are numeric values and the response is a factor.
+
+No missing values but many variables have zero values. Zero values for pregnant is to be expected but shouldn't be present for pressure, triceps and insulin. Diagnostics plots should reveal if they have zero values.
+
+## Histograms
+
+```{r}
+for (col in numeric_cols) {
+    print(training_df %>%
+        ggplot() +
+        geom_histogram(aes(x = !!col), bins = 30) +
+        ggtitle(quo_label(col)))
+}
+
+```
+
+## Density
+
+```{r}
+for (col in numeric_cols) {
+    print(training_df %>%
+        ggplot() +
+        geom_density(aes(x = !!col)) +
+        ggtitle(quo_label(col)))
+}
+
+```
+
+
+# Data Cleaning
+
++ Glucose should not be zero. Mark the two zero values as NA.
++ Pressure. Mark zeros as missing.
++ Triceps. Mark zeros as missing.
++ Insulin. Mark zeros as missing. Most values are missing
++ Mass. Mark zeros as missing
+
+```{r}
+training_df <- pid_clean(training_df)
+```
+
+## Clean Data Degeneracy
+
+```{r}
+emc_variable_degeneracy(training_df) %>% knitr::kable(digits = 1)
+```
+
+Need to fix bugs in EMC variable degeneracy function. We should still be able to get the variance.
+
+Insulin has a large number of missing variables. Consider dropping or cross check imputation methods.
+
+# Clean Data
+
+```{r}
+clean_training_df <- pid_clean(training_df)
+```
+
+## Data Peek
+
+```{r, echo=FALSE}
+head(clean_training_df, n = 20) %>% knitr::kable()
+```
+
+## Variable Degeneracy
+
+```{r}
+emc_variable_degeneracy(clean_training_df) %>% knitr::kable(digits = 1)
+```
+
+Now we have plenty of missing values.
+
+## Variable Distribution
+
+```{r}
+emc_variable_distribution(training_df)
+```
+
+Some skew in some variables. Some BoxCox transforms could be useful.
+
+## Complete Data Statistics
+
+How many complete rows do we have now?
+
+```{r}
+clean_training_df %>% na.omit() %>% emc_data_statistics() %>% knitr::kable()
+```
+
+313 complete rows. Enough to check correlations.
+
+
+## Correlations
+
+```{r}
+# calculate a correlation matrix for numeric variables
+
+correlation_df <- 
+    clean_training_df %>%
+    select_if(is.numeric) %>%
+    na.omit()
+
+correlations <- 
+    correlation_df %>%
+    cor() %>%
+    round(2)
+
+# Compute a matrix of correlation p-values
+correlation_p <- ggcorrplot::cor_pmat(correlation_df)
+```
+
+### Correlations matrix
+
+```{r}
+print(correlations)
+```
+
+### Corrplot
+
+```{r}
+
+ggcorrplot::ggcorrplot(correlations, hc.order = TRUE,
+    type = "lower", p.mat = correlation_p, insig = "blank", lab = TRUE)
+
+```
+
+No highly correlation variables.
+
+## Clean Data Histogram
+
+```{r}
+for (col in numeric_cols) {
+    print(clean_training_df %>%
+        ggplot() +
+        geom_histogram(aes(x = !!col), bins = 30, na.rm = TRUE) +
+        ggtitle(quo_label(col)))
+}
+
+```
+
+## Density
+
+```{r}
+for (col in numeric_cols) {
+    print(clean_training_df %>%
+        ggplot() +
+        geom_density(aes(x = !!col), na.rm = TRUE) +
+        ggtitle(quo_label(col)))
+}
+
+```
+
