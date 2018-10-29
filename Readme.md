@@ -17,6 +17,19 @@ Exploration of the classic sunspots data set.
 
 Challenge: Can we detect and quantify the eleven year sunspot cycle.
 
+## PimaIndiansDiabetes
+
+Predictive modelling task.
+
+Do a predictive model using the classic PimaIndiansDiabetes.
+
+Implemented using the latest and greatest including caret, rlang and my own emc packages.
+
+pid_exploration explores the dataset.
+
+pid_spotcheck spot checks algorithms.
+
+
 
 
 
