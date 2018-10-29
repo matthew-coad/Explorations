@@ -1,0 +1,220 @@
+---
+title: "Subspots Exploration"
+output:
+  html_document:
+    self_contained: false    
+---
+
+Exploration of the classic sunspots data set.
+
+Challange: Can we detect and quantify the eleven year sunspot cycle.
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(knitr)
+library(tidyverse)
+library(rlang)
+library(emc)
+
+```
+
+```{r, message=FALSE}
+
+min_year <- 1749
+max_year <- 1983
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+sunspots_raw <- datasets::sunspots
+
+sunspots_work <- tibble(count = as.numeric(sunspots_raw))
+sunspots_work$year <- rep(seq(min_year, max_year), each = 12)
+sunspots_work$month <- rep(seq(1, 12), times = max_year - min_year + 1)
+sunspots_work$index <- 1:nrow(sunspots_work)
+
+sunspots_work$smooth_count = predict(loess(count ~ index, sunspots_work, span = 0.03))
+
+peak_min <- 1
+peak_max <- nrow(sunspots_work)
+peak_seq <- seq(peak_min, peak_max)
+peak_count <- sunspots_work$smooth_count
+peak_interior <- peak_seq > peak_min & peak_seq < peak_max
+peak_match <- peak_seq %>% map_lgl(~peak_interior[.] && peak_count[.] > peak_count[. - 1] && peak_count[.] > peak_count[. + 1])
+peak_index <- which(peak_match)
+peak_smooth_count <- sunspots_work$smooth_count[peak_match]
+
+sunspot_peaks <- tibble(smooth_count = peak_smooth_count, index = peak_index)
+
+cycle_length <- diff(peak_index)
+cycle_years <- cycle_length / 12
+cycle_start <- peak_index[1:length(peak_index) - 1]
+cycle_start_count <- sunspots_work$smooth_count[cycle_start]
+cycle_end <- peak_index[2:length(peak_index)]
+cycle_end_count <- sunspots_work$smooth_count[cycle_end]
+cycle_index <- seq(1, length(peak_index) - 1)
+
+sunspot_cycles <-
+    tibble(
+           cycle = cycle_index,
+           length = cycle_length,
+           years = cycle_years,
+           start = cycle_start,
+           start_count = cycle_start_count,
+           end = cycle_end,
+           end_count = cycle_end_count)
+sunspots_cycle_index <-
+    list(sunspot_cycles$start, sunspot_cycles$end, sunspot_cycles$cycle) %>%
+    pmap_df(function(start, end, cycle) tibble(cycle = cycle, index = seq(start + 1, end), cycle_index = seq(1, end - start), cycle_length = end - start)) %>%
+    mutate(cycle_prop = cycle_index / cycle_length)
+
+sunspots <- sunspots_work %>% left_join(sunspots_cycle_index, by = "index")
+
+sunspots_distribution <- emc_variable_distribution(sunspots)
+
+sunspots_yearly <- sunspots %>% group_by(year) %>% summarise(count = sum(count))
+
+print("Data Loaded")
+
+```
+
+## Variable Statistics
+
+```{r}
+sunspots_distribution %>% kable()
+```
+
+## Count Exploration
+
+**What does a simple explore of the year vs count show?**
+```{r}
+ggplot(sunspots, aes(x = year, y = count)) + geom_line()
+```
+
+The sunspot cycle is easily visible.
+
+## Yearly Exploration
+
+Summarise the sunspots counted per year. 
+
+**Lets see if the cycle is still visible.**
+
+```{r}
+ggplot(sunspots_yearly, aes(x = year, y = count)) + geom_line()
+```
+
+The pattern is there.
+
+## Monthly Exploration
+
+**Is the number of sunspots related to the month?**
+```{r}
+ggplot(sunspots, aes(x = month, y = count)) + geom_point()
+```
+
+No readily discernable pattern. It doesn't appear that the sunspot count is related to
+the month. 
+
+Which is as expected. However we could expect plenty of cyclic datasets to be connected to the year
+so its good to check.
+
+## Cycle Exploration
+
+Lets see if we can't find a way to detect the cycle peaks. Basically we are looking
+for a local maxima.
+
+**Zoom in on a few cycles**
+
+```{r}
+
+sunspots %>%
+    filter(index <= 500) %>%
+    ggplot(aes(x = index, y = count)) +
+    geom_line()
+
+```
+
+Its a bit noisy.
+
+**Try loess smoothing**
+
+```{r}
+
+sunspots %>%
+    filter(index <= 500) %>%
+    ggplot(aes(x = index, y = count)) +
+    geom_line(color = "darkgrey") +
+    geom_line(aes(y = smooth_count), color = "black")
+
+```
+
+Okay that should make it easy to detect the peaks.
+
+Lets try something simple. 
+
+**Find smoothed point that is bigger than its immediate neighbours. And plot.**
+
+```{r}
+
+sunspots %>%
+    ggplot(aes(x = index, y = count)) +
+    geom_line(color = "darkgrey")  +
+    geom_line(aes(y = smooth_count), color = "black") +
+    geom_point(data = sunspot_peaks, aes(x = index, y = smooth_count), color = "Red", size =2)
+
+
+```
+
+Okay looks like we have detected the peaks.
+
+Number of peaks detected is: `r nrow(sunspot_peaks)`.  
+The minimum months between two peaks is: `r min(sunspot_cycles$length)`.  
+The maximum months between two peaks is: `r max(sunspot_cycles$length)`.
+The mean months between two peaks is: `r mean(sunspot_cycles$length)`.  
+
+Doesn't seem to be any double ups so i think we are good.
+
+## Sunspot Cycle
+
+```{r}
+
+sunspot_cycles %>%
+    ggplot(aes(x = years)) +
+    geom_density()
+
+```
+
+The mean length of the Sunspot Cycle is: `r mean(sunspot_cycles$years)` years.
+The standard deviation of the length of the Sunspot Cycle is: `r sd(sunspot_cycles$years)`.  
+
+
+## Plot Cycle
+
+Now that we know the sunspot cycles we can plot them over each other.
+
+```{r}
+
+sunspots %>%
+    na.omit() %>%
+    ggplot(aes(x = cycle_index, y = count, group = cycle, color = cycle)) +
+    geom_point(alpha = 0.5, size = .5) + geom_line(aes(y = smooth_count))
+
+```
+
+Or plot them side-by-side.
+
+```{r}
+
+sunspots %>% na.omit(sunspots) %>% ggplot(aes(x = cycle_index, y = count, group = cycle, color = cycle_length)) + geom_point(alpha = 0.5, size = .5) + geom_line(aes(y = smooth_count)) + facet_wrap(~cycle)
+
+```
+
+Interesting. It looks like their is a relationship between the length of a cycle and the strength of the next peak.
+
+
+## Cycle length vs cycle end height
+
+```{r}
+
+sunspot_cycles %>% ggplot(aes(x = length, y = end_count)) + geom_point() + geom_smooth(method = "lm")
+
+```

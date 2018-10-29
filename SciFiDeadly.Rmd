@@ -1,0 +1,88 @@
+---
+title: "SciFi Deadly"
+author: "Matthew Coad"
+date: "4 September 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(ggplot2)
+
+death_vec <- c(
+    1975, "Robert A. Heinlein", 1907, 1988,
+    1976, "Jack Williamson", 1908, 2006,
+    1977, "Clifford D. Simak", 1904, 1988,
+    1978, NA, NA, NA,
+    1979, "L. Sprague de Camp",1907 ,2000,
+    1980, NA, NA, NA,
+    1981, "Fritz Leiber",1910 ,1992,
+    1982, NA, NA, NA,
+    1983, NA, NA, NA,
+    1984, "Andre Norton", 1912, 2005,
+    1985, NA, NA, NA,
+    1986, "Arthur C. Clarke", 1917, 2008,
+    1987, "Isaac Asimov", 1920, 1992,
+    1988, "Alfred Bester", 1913, 1987,
+    1989, "Ray Bradbury", 1920, 2012,
+    1990, NA, NA, NA,
+    1991, "Lester del Rey", 1915, 1993,
+    1992, NA, NA, NA,
+    1993, "Frederik Pohl", 1919, 2013,
+    1994, NA, NA, NA,
+    1995, "Damon Knight", 1922, 2002,
+    1996, "A. E. van Vogt", 1912, 2000,
+    1997, "Jack Vance", 1916, 2013,
+    1998, "Poul Anderson", 1926, 2001,
+    1999, "Hal Clement", 1922, 2003,
+    2000, "Brian W. Aldiss", 1925, 2017,
+    2001, "Philip Jos ? Farmer", 1918, 2009,
+    2002, NA, NA, NA,
+    2003, "Ursula K. Le Guin", 1929, NA,
+    2004, "Robert Silverberg", 1935, NA,
+    2005, "Anne McCaffrey", 1926, NA,
+    2006, "Harlan Ellison", 1934, NA,
+    2007, "James Gunn", 1923,NA,
+    2008, "Michael Moorcock", 1939, NA,
+    2009, "Harry Harrison",1925, 2012,
+    2010, "Joe Haldeman", 1943, NA,
+    2011, NA, NA, NA,
+    2012, "Connie Willis", 1945, NA,
+    2013, "Gene Wolfe", 1931, NA,
+    2014, "Samuel Delany", 1942, NA,
+    2015, "Larry Niven", 1938, NA,
+    2016, "C.J. Cherryh", 1942, NA,
+    2017, "Jane Yolen", 1939, NA
+)
+
+death_mtr <- matrix(death_vec, ncol = 4, byrow = TRUE)
+gm <- tibble(year = as.integer(death_mtr[, 1]), author = death_mtr[, 2], birth = as.integer(death_mtr[, 3]), death = as.integer(death_mtr[, 4]))
+
+```
+
+## Is being a sci fi author bad for your health?
+
+Quick and dirty data analysis that a perception held by one of my friends that their favorite SciFi authors seem to die young.
+
+Ah. I grabbed the list of hugo award winners from some website, cleaned it up and did some plots.
+
+**Whats the average age hugo award winners died?**
+
+```{r}
+
+gm %>% na.omit() %>% mutate(age_death = death - birth) %>% summarise(avg_d = mean(age_death))
+
+```
+
+**Plot of Hugo award winners death**
+
+```{r}
+
+gm %>% na.omit() %>% mutate(age_death = death - birth) %>% ggplot(aes(x = age_death)) + geom_density()
+```
+
+Hugo award winners look like they in general live to a ripe old age.
+
+**Conclusion**: Famous SciFi authors don't die young!
