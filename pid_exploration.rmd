@@ -30,7 +30,7 @@ Top results achieve a classification accuracy of approximately 77%.
 library(tidyverse)
 library(caret)
 library(e1071)
-library(emc)
+library(emc2)
 library(rlang)
 
 knitr::opts_chunk$set(fig.width = 14, fig.height = 8, echo = FALSE, warning = FALSE, message = FALSE, comment = "")

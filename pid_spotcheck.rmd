@@ -9,7 +9,7 @@ output:
 library(tidyverse)
 library(rlang)
 library(caret)
-library(emc)
+library(emc2)
 library(recipes)
 library(forcats)
 
@@ -74,7 +74,7 @@ emc_algorithms() %>% filter(two_class, core)
 Try 
 
 ```{r}
-quick_spot_algorithms <- c("earth", "glmnet", "lda", "nb", "ada", "rf", "svmLinear", "svmRadial", "xgbLinear", "xgbTree")
+quick_spot_algorithms <- c("null", "earth", "glmnet", "lda", "nb", "ada", "rf", "svmLinear", "svmRadial", "xgbLinear", "xgbTree")
 paste(quick_spot_algorithms, collapse = ", ") %>% cat()
 ```
 
@@ -83,9 +83,8 @@ paste(quick_spot_algorithms, collapse = ", ") %>% cat()
 View the spotcheck parameters
 
 ```{r}
-quick_spot_parameters <- 
-    expand.grid(algorithm = quick_spot_algorithms) %>% as_tibble() %>%
-    mutate(label = sprintf("Quick spotcheck algorithm '%s'", algorithm))
+quick_spot_parameters <- emc_parameters(name = sprintf("Quick spotcheck '%s'", algorithm),
+                                        algorithm = quick_spot_algorithms)
 quick_spot_parameters
 ```
 
@@ -109,91 +108,98 @@ if (!exists("prior_quick_spot_emc")) {
 
 # prior_quick_spot_emc <- quick_spot_emc
 
-quick_spot_emc <-
-    emc_bind(
+quick_spot_train <-
+    emc_train(
         quick_spot_parameters,
-         emc_record(
-             train = train(
-                 quick_spot_recipe,
-                 data = quick_spot_df,
-                 method = algorithm,
-                 trControl = quick_spot_control,
-                 metric = quick_spot_metric
-             ),
-             .label = label,
-             .verbose = FALSE,
-             .cache_path = paste0("Cache/", label, ".rds")
-         ),
-        emc_performance(train),
-        emc_resamples(train)
+        quick_spot_recipe,
+        data = quick_spot_df,
+        method = algorithm,
+        trControl = quick_spot_control,
+        metric = quick_spot_metric,
+        verbose = FALSE,
+        cache_path = paste0("Cache/", name, ".rds")
     )
 
-quick_spot_emc %>% dplyr::select(label, Accuracy, train_error, train_warnings, train_duration) %>% arrange(desc(Accuracy))
+emc_performance(quick_spot_train)
 ```
+
+## Whats up with Naive Bayes?
+
+```{r}
+
+quick_spot_train %>% filter(algorithm == "nb") %>% pull(log) %>% emc_replay()
+
+```
+
+Its having trouble making predictions in some cases. We won't use it.
 
 ## Accuracy Boxplot
 
 ```{r}
 
-quick_spot_resamples <- 
-    quick_spot_emc %>%
-    dplyr::select(algorithm, resamples) %>% 
-    unnest(resamples)
-
-quick_spot_resamples %>%
+quick_spot_resamples_data <- emc_resamples_data(quick_spot_train)
+quick_spot_resamples_data %>%
     ggplot() +
-    geom_boxplot(aes(x = fct_reorder(algorithm, Accuracy), y = Accuracy))
+    geom_boxplot(aes(x = fct_reorder(algorithm, accuracy), y = accuracy))
     
 ```
 
-Ada has a higher median value but I trust earth better because its a linear algorithm and has a more stable accuracy.
+Looks like the algorithms are maxing out at about .77 performance. Linear Discrimant analysis is a simple linear algorithm and is doing pretty well.
 
 ## Accuracy Density Plot
 
 ```{r}
-quick_spot_emc %>% 
-    dplyr::select(algorithm, resamples) %>% 
+quick_spot_resamples_data %>%
     filter(algorithm != "null") %>%
-    unnest(resamples) %>%
     ggplot() +
-    geom_density(aes(x = Accuracy, color = algorithm))
+    geom_density(aes(x = accuracy, color = algorithm))
 ```
 
-Possibly non-linear response. SVM might help.
+## Accuracy Differences
 
-After checking it doesn't! Earth gives a nice stable result. We'll go with that.
+```{r}
+quick_spot_resamples <- 
+    quick_spot_train %>% 
+    filter(!algorithm %in% c("null", "nb", "xgbLinear")) %>% 
+    emc_resamples(name = algorithm)
+summary(diff(quick_spot_resamples))
+```
 
-We've hit the top accuracy of 77%.
+Resample differences confirm their is nothing between the top algorithms
+
+## Resamples Bar
+
+```{r}
+ggplot(quick_spot_resamples)
+```
+
+## Resamples Scatter
+
+```{r}
+
+parallelplot(quick_spot_resamples)
+
+```
+
+Worth considering stacking.
+
+After checking it doesn't! Lets go with lda. Its a simple linear model.
 
 Get the final model.
 
 ```{r}
-final_model <- quick_spot_emc %>% filter(algorithm == "earth") %>% pull(train) %>% first()
+final_model <- quick_spot_train %>% filter(algorithm == "lda") %>% pull(result) %>% first()
 final_model
 ```
-
-Look like there is room for tuning.
 
 But lets just grab the final model and validate it.
 
 ```{r}
-final_model <- quick_spot_emc %>% filter(algorithm == "earth") %>% pull(train) %>% first()
 test_df <- pid_training(pid_load())
 test_predictions <- predict(final_model, newdata = test_df)
 caret::confusionMatrix(test_predictions, test_df$diabetes)
 
 ```
 
-73% accuracy with the 95% CI inside our 77% target.
-
-# Further Work
-
-' Add features to emc to extract caret resamples.
-parallelplot(spotCheck)
-
-' Add features to emc to for pairwise scatter plots
-splom(spotCheck)
-
-' Add features to emc to extract caret resamples.
-summary(diff(spotCheck))
+76.5% accuracy with the 95% CI inside our 77% target.
 
